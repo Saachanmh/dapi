@@ -6,329 +6,315 @@ import FilterBar from './components/FilterBar';
 import AccessibilityPanel from './components/AccessibilityPanel';
 import MarkerSelector from './components/MarkerSelector';
 import { getPMRByCommune, getAllPMRLocations, formatPMRData } from './services/pmrService';
-import { geocodeAddress, calculateRoute } from './services/routingService';
+import { geocodeAddress } from './services/routingService';
 import { findPMRAlongRoute } from './services/pmrProximityService';
 import {
-  createMarker,
-  saveMarkersToLocalStorage,
-  getMarkersFromLocalStorage,
-  deleteMarker,
-  MARKER_TYPES,
+    createMarker,
+    saveMarkersToLocalStorage,
+    getMarkersFromLocalStorage,
 } from './services/customMarkerService';
 import './App.css';
 
 /**
+ * Calcule un itinéraire rue par rue avec OSRM public (sans clé API, sans CORS)
+ */
+const calculateRouteWithOSRM = async (start, end) => {
+    const osrmServers = [
+        'https://router.project-osrm.org/route/v1/foot',
+        'https://routing.openstreetmap.de/routed-foot/route/v1/foot'
+    ];
+
+    for (const server of osrmServers) {
+        try {
+            const url = `${server}/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson&steps=true`;
+
+            const response = await fetch(url, {
+                method: 'GET',
+                signal: AbortSignal.timeout(8000)
+            });
+
+            if (!response.ok) {
+                console.warn(`Serveur ${server} a retourné ${response.status}`);
+                continue;
+            }
+
+            const data = await response.json();
+
+            if (data.code === 'Ok' && data.routes?.[0]) {
+                const coordinates = data.routes[0].geometry.coordinates.map(
+                    coord => [coord[1], coord[0]]
+                );
+
+                console.log(`✅ Route calculée avec ${server}`, {
+                    points: coordinates.length,
+                    distance: data.routes[0].distance,
+                    duration: data.routes[0].duration
+                });
+
+                return {
+                    geometry: coordinates,
+                    distance: data.routes[0].distance,
+                    duration: data.routes[0].duration,
+                    success: true
+                };
+            }
+        } catch (error) {
+            console.warn(`❌ Erreur avec ${server}:`, error.message);
+            continue;
+        }
+    }
+
+    throw new Error('Impossible de calculer l\'itinéraire - Tous les serveurs de routage sont indisponibles');
+};
+
+/**
  * Composant principal de l'application PMR
- * Gère l'état global et la logique de l'application
  */
 function App() {
-  const [pmrLocations, setPMRLocations] = useState([]);
-  const [startLocation, setStartLocation] = useState(null);
-  const [endLocation, setEndLocation] = useState(null);
-  const [route, setRoute] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('bank');
-  const [routePath, setRoutePath] = useState(null);
-  const [error, setError] = useState(null);
-  const [showPMR, setShowPMR] = useState(false);
-  const [showRoutingPanel, setShowRoutingPanel] = useState(false);
-  const [pmrNearbyRoute, setPMRNearbyRoute] = useState([]);
-  const [customMarkers, setCustomMarkers] = useState([]); // Marqueurs personnalisés
-  const [showMarkerSelector, setShowMarkerSelector] = useState(false); // État du sélecteur
-  const [pendingMarkerType, setPendingMarkerType] = useState(null); // Type de marqueur en attente
-  const [pendingMarkerLocation, setPendingMarkerLocation] = useState(null); // Localisation en attente // Places PMR proches du trajet
+    const [pmrLocations, setPMRLocations] = useState([]);
+    const [startLocation, setStartLocation] = useState(null);
+    const [endLocation, setEndLocation] = useState(null);
+    const [route, setRoute] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [activeFilter, setActiveFilter] = useState('bank');
+    const [routePath, setRoutePath] = useState(null);
+    const [error, setError] = useState(null);
+    const [showPMR, setShowPMR] = useState(false);
+    const [showRoutingPanel, setShowRoutingPanel] = useState(false);
+    const [pmrNearbyRoute, setPMRNearbyRoute] = useState([]);
+    const [customMarkers, setCustomMarkers] = useState([]);
+    const [showMarkerSelector, setShowMarkerSelector] = useState(false);
+    const [pendingMarkerType, setPendingMarkerType] = useState(null);
 
-  // Charger les places PMR au montage du composant
-  useEffect(() => {
-    loadPMRLocations();
-    // Charger les marqueurs personnalisés sauvegardés
-    const savedMarkers = getMarkersFromLocalStorage();
-    setCustomMarkers(savedMarkers);
-  }, []);
+    useEffect(() => {
+        loadPMRLocations();
+        const savedMarkers = getMarkersFromLocalStorage();
+        setCustomMarkers(savedMarkers);
+    }, []);
 
-  // Afficher le panneau quand un itinéraire est calculé
-  useEffect(() => {
-    if (route && routePath) {
-      setShowRoutingPanel(true);
+    useEffect(() => {
+        if (route && routePath) {
+            setShowRoutingPanel(true);
+        }
+    }, [route, routePath]);
+
+    useEffect(() => {
+        if (routePath && pmrLocations.length > 0) {
+            const nearby = findPMRAlongRoute(pmrLocations, routePath, 0.5);
+            setPMRNearbyRoute(nearby);
+        } else {
+            setPMRNearbyRoute([]);
+        }
+    }, [routePath, pmrLocations]);
+
+    const loadPMRLocations = async () => {
+        try {
+            setIsLoading(true);
+            setError(null);
+            const data = await getAllPMRLocations();
+            const formatted = formatPMRData(data);
+            setPMRLocations(formatted);
+        } catch (error) {
+            console.error('Erreur lors du chargement des places PMR:', error);
+            loadPMRByNantes();
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const loadPMRByNantes = async () => {
+        try {
+            setIsLoading(true);
+            const data = await getPMRByCommune('Nantes');
+            const formatted = formatPMRData(data);
+            setPMRLocations(formatted);
+        } catch (error) {
+            console.error('Erreur lors du chargement des places PMR de Nantes:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSearch = async (addresses) => {
+        try {
+            setIsLoading(true);
+            setError(null);
+
+            let startGeo = addresses.depart;
+            if (!startGeo.latitude || !startGeo.longitude) {
+                startGeo = await geocodeAddress(addresses.depart.address);
+            }
+            setStartLocation(startGeo);
+
+            let endGeo = addresses.arrivee;
+            if (!endGeo.latitude || !endGeo.longitude) {
+                endGeo = await geocodeAddress(addresses.arrivee.address);
+            }
+            setEndLocation(endGeo);
+
+            // ✅ Utiliser OSRM public (sans clé API, sans CORS)
+            const routeData = await calculateRouteWithOSRM(startGeo, endGeo);
+
+            setRoute(routeData);
+            setRoutePath(routeData.geometry);
+
+            console.log('✅ Trajet calculé rue par rue:', {
+                distance: `${(routeData.distance / 1000).toFixed(2)} km`,
+                duree: `${Math.round(routeData.duration / 60)} min`,
+                points: routeData.geometry.length
+            });
+
+        } catch (err) {
+            console.error('❌ Erreur lors de la recherche:', err);
+            setError(err.message || 'Erreur lors du calcul de l\'itinéraire');
+            setRoute(null);
+            setRoutePath(null);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handlePMRMarkerClick = (location) => {
+        console.log('Place sélectionnée:', location);
+    };
+
+    const handleMapClick = (coordinates) => {
+        console.log('🗺️ Clic sur la carte:', coordinates, 'Type en attente:', pendingMarkerType);
+
+        if (pendingMarkerType) {
+            const newMarker = createMarker(
+                coordinates.latitude,
+                coordinates.longitude,
+                pendingMarkerType,
+                ''
+            );
+
+            console.log('✅ Marqueur créé:', newMarker);
+
+            const updatedMarkers = [...customMarkers, newMarker];
+            setCustomMarkers(updatedMarkers);
+            saveMarkersToLocalStorage(updatedMarkers);
+
+            setPendingMarkerType(null);
+            setShowMarkerSelector(false);
+        }
+    };
+
+    const handleMarkerTypeSelected = (type) => {
+        console.log('🎯 Type sélectionné:', type);
+        setPendingMarkerType(type);
+    };
+
+
+    const handleShowMarkerSelector = () => {
+        setShowMarkerSelector(true);
+    };
+
+    const handleCloseMarkerSelector = () => {
+        setShowMarkerSelector(false);
+        setPendingMarkerType(null);
+    };
+
+    const handleCustomMarkerClick = (marker) => {
+        console.log('Marqueur personnalisé cliqué:', marker);
+    };
+
+    const handleClearRoute = () => {
+        setStartLocation(null);
+        setEndLocation(null);
+        setRoute(null);
+        setRoutePath(null);
+        setShowRoutingPanel(false);
+        setPMRNearbyRoute([]);
+        setError(null);
+    };
+
+    const handleCloseRoutingPanel = () => {
+        setShowRoutingPanel(false);
+    };
+
+    const handleFilterChange = (filterId) => {
+        setActiveFilter(filterId);
+    };
+
+    const handlePMRToggle = (checked) => {
+        setShowPMR(checked);
+    };
+
+    const handleShowPMRNearby = () => {
+        if (pmrNearbyRoute.length > 0) {
+            setShowPMR(true);
+        }
+    };
+
+    const handleAccessibilitySettings = (action) => {
+        console.log('Action accessibilité:', action);
+    };
+
+    let visiblePMRLocations = [];
+    if (showPMR) {
+        if (pmrNearbyRoute.length > 0) {
+            visiblePMRLocations = pmrNearbyRoute;
+        } else if (routePath) {
+            visiblePMRLocations = [];
+        } else {
+            visiblePMRLocations = pmrLocations;
+        }
     }
-  }, [route, routePath]);
 
-  // Calculer les places PMR proches du trajet quand le trajet change
-  useEffect(() => {
-    if (routePath && pmrLocations.length > 0) {
-      const nearby = findPMRAlongRoute(pmrLocations, routePath, 0.5); // Rayon de 500m
-      setPMRNearbyRoute(nearby);
-    } else {
-      setPMRNearbyRoute([]);
-    }
-  }, [routePath, pmrLocations]);
+    return (
+        <div className="app">
+            {error && (
+                <div className="app__error">
+                    ⚠️ {error}
+                </div>
+            )}
+            <Map
+                pmrLocations={visiblePMRLocations}
+                startLocation={startLocation}
+                endLocation={endLocation}
+                routePath={routePath}
+                customMarkers={customMarkers}
+                onMarkerClick={handlePMRMarkerClick}
+                onMapClick={handleMapClick}
+                onCustomMarkerClick={handleCustomMarkerClick}
+            />
+            <SearchBar
+                onSearch={handleSearch}
+                isLoading={isLoading}
+                startLocation={startLocation}
+                endLocation={endLocation}
+            />
+            <FilterBar
+                activeFilter={activeFilter}
+                onFilterChange={handleFilterChange}
+                onPMRToggle={handlePMRToggle}
+                showPMR={showPMR}
+            />
+            {showRoutingPanel && (
+                <RoutingPanel
+                    startLocation={startLocation}
+                    endLocation={endLocation}
+                    route={route}
+                    isLoading={isLoading}
+                    onClear={handleClearRoute}
+                    onClose={handleCloseRoutingPanel}
+                    pmrNearbyCount={pmrNearbyRoute.length}
+                    onShowPMRNearby={handleShowPMRNearby}
+                />
+            )}
+            <AccessibilityPanel
+                onSettingsClick={handleAccessibilitySettings}
+                onAddMarker={handleShowMarkerSelector}
+            />
 
-  /**
-   * Charge toutes les places PMR
-   */
-  const loadPMRLocations = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const data = await getAllPMRLocations();
-      const formatted = formatPMRData(data);
-      setPMRLocations(formatted);
-    } catch (error) {
-      console.error('Erreur lors du chargement des places PMR:', error);
-      loadPMRByNantes();
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  /**
-   * Charge les places PMR pour Nantes spécifiquement
-   */
-  const loadPMRByNantes = async () => {
-    try {
-      setIsLoading(true);
-      const data = await getPMRByCommune('Nantes');
-      const formatted = formatPMRData(data);
-      setPMRLocations(formatted);
-    } catch (error) {
-      console.error('Erreur lors du chargement des places PMR de Nantes:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  /**
-   * Effectue la recherche des adresses et calcule l'itinéraire
-   */
-  const handleSearch = async (addresses) => {
-    try {
-      setIsLoading(true);
-      setError(null);
-
-      // Récupérer les coordonnées du départ
-      let startGeo = addresses.depart;
-      if (!startGeo.latitude || !startGeo.longitude) {
-        startGeo = await geocodeAddress(addresses.depart.address);
-      }
-      setStartLocation(startGeo);
-
-      // Récupérer les coordonnées de l'arrivée
-      let endGeo = addresses.arrivee;
-      if (!endGeo.latitude || !endGeo.longitude) {
-        endGeo = await geocodeAddress(addresses.arrivee.address);
-      }
-      setEndLocation(endGeo);
-
-      // Calculer l'itinéraire
-      const routeData = await calculateRoute(startGeo, endGeo);
-      setRoute(routeData);
-      setRoutePath(routeData.geometry);
-      // Le panneau s'affichera automatiquement via useEffect
-
-    } catch (err) {
-      console.error('Erreur lors de la recherche:', err);
-      setError(err.message || 'Erreur lors du calcul de l\'itinéraire');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  /**
-   * Gère la sélection d'une place PMR
-   */
-  const handlePMRMarkerClick = (location) => {
-    console.log('Place sélectionnée:', location);
-  };
-
-  /**
-   * Gère le clic sur la carte pour ajouter un marqueur
-   */
-  const handleMapClick = (coordinates) => {
-    console.log('🗺️ Clic sur la carte:', coordinates, 'Type en attente:', pendingMarkerType);
-
-    if (pendingMarkerType) {
-      // Créer immédiatement le marqueur
-      const newMarker = createMarker(
-        coordinates.latitude,
-        coordinates.longitude,
-        pendingMarkerType,
-        '' // Pas de description
-      );
-
-      console.log('✅ Marqueur créé:', newMarker);
-
-      const updatedMarkers = [...customMarkers, newMarker];
-      setCustomMarkers(updatedMarkers);
-      saveMarkersToLocalStorage(updatedMarkers);
-
-      // Réinitialiser
-      setPendingMarkerType(null);
-      setPendingMarkerLocation(null);
-      setShowMarkerSelector(false);
-    }
-  };
-
-  /**
-   * Gère la sélection du type de marqueur
-   */
-  const handleMarkerTypeSelected = (type) => {
-    console.log('🎯 Type sélectionné:', type);
-    setPendingMarkerType(type);
-    // L'utilisateur doit maintenant cliquer sur la carte
-  };
-
-  /**
-   * Supprime un marqueur personnalisé
-   */
-  const handleDeleteCustomMarker = (markerId) => {
-    const updatedMarkers = deleteMarker(customMarkers, markerId);
-    setCustomMarkers(updatedMarkers);
-    saveMarkersToLocalStorage(updatedMarkers);
-  };
-
-  /**
-   * Affiche le sélecteur de type de marqueur
-   */
-  const handleShowMarkerSelector = () => {
-    setShowMarkerSelector(true);
-  };
-
-  /**
-   * Ferme le sélecteur de marqueur et réinitialise les états
-   */
-  const handleCloseMarkerSelector = () => {
-    setShowMarkerSelector(false);
-    setPendingMarkerType(null);
-    setPendingMarkerLocation(null);
-  };
-
-  /**
-   * Gère le clic sur un marqueur personnalisé
-   */
-  const handleCustomMarkerClick = (marker) => {
-    console.log('Marqueur personnalisé cliqué:', marker);
-  };
-
-  /**
-   * Réinitialise complètement l'itinéraire et le trajet
-   */
-  const handleClearRoute = () => {
-    setStartLocation(null);
-    setEndLocation(null);
-    setRoute(null);
-    setRoutePath(null);
-    setShowRoutingPanel(false);
-    setPMRNearbyRoute([]);
-    setError(null);
-  };
-
-  /**
-   * Ferme simplement le panneau sans effacer le trajet
-   */
-  const handleCloseRoutingPanel = () => {
-    setShowRoutingPanel(false);
-  };
-
-  /**
-   * Gère les changements de filtre
-   */
-  const handleFilterChange = (filterId) => {
-    setActiveFilter(filterId);
-  };
-
-  /**
-   * Gère l'affichage/masquage des places PMR
-   */
-  const handlePMRToggle = (checked) => {
-    setShowPMR(checked);
-  };
-
-  /**
-   * Gère le clic sur l'icône fauteuil roulant pour afficher les PMR proches
-   */
-  const handleShowPMRNearby = () => {
-    // Afficher SEULEMENT les places PMR proches du trajet
-    if (pmrNearbyRoute.length > 0) {
-      setShowPMR(true);
-    }
-  };
-
-  /**
-   * Gère les clics sur les raccourcis d'accessibilité
-   */
-  const handleAccessibilitySettings = (action) => {
-    console.log('Action accessibilité:', action);
-  };
-
-  // Déterminer quelles places PMR afficher
-  let visiblePMRLocations = [];
-  if (showPMR) {
-    if (pmrNearbyRoute.length > 0) {
-      // Si on a des PMR proches du trajet, afficher seulement celles-là
-      visiblePMRLocations = pmrNearbyRoute;
-    } else if (routePath) {
-      // Si on a un trajet mais pas de PMR proches, afficher vide
-      visiblePMRLocations = [];
-    } else {
-      // Sinon, afficher toutes les PMR (comportement normal)
-      visiblePMRLocations = pmrLocations;
-    }
-  }
-
-  return (
-    <div className="app">
-      {error && (
-        <div className="app__error">
-          ⚠️ {error}
+            <MarkerSelector
+                onMarkerTypeSelected={handleMarkerTypeSelected}
+                isActive={showMarkerSelector}
+                onClose={handleCloseMarkerSelector}
+            />
         </div>
-      )}
-      <Map
-        pmrLocations={visiblePMRLocations}
-        startLocation={startLocation}
-        endLocation={endLocation}
-        routePath={routePath}
-        customMarkers={customMarkers}
-        onMarkerClick={handlePMRMarkerClick}
-        onMapClick={handleMapClick}
-        onCustomMarkerClick={handleCustomMarkerClick}
-      />
-      <SearchBar
-        onSearch={handleSearch}
-        isLoading={isLoading}
-        startLocation={startLocation}
-        endLocation={endLocation}
-      />
-      <FilterBar
-        activeFilter={activeFilter}
-        onFilterChange={handleFilterChange}
-        onPMRToggle={handlePMRToggle}
-        showPMR={showPMR}
-      />
-      {showRoutingPanel && (
-        <RoutingPanel
-          startLocation={startLocation}
-          endLocation={endLocation}
-          route={route}
-          isLoading={isLoading}
-          onClear={handleClearRoute}
-          onClose={handleCloseRoutingPanel}
-          pmrNearbyCount={pmrNearbyRoute.length}
-          onShowPMRNearby={handleShowPMRNearby}
-        />
-      )}
-      <AccessibilityPanel
-        onSettingsClick={handleAccessibilitySettings}
-        onAddMarker={handleShowMarkerSelector}
-      />
-
-      {/* Sélecteur de type de marqueur personnalisé */}
-      <MarkerSelector
-        onMarkerTypeSelected={handleMarkerTypeSelected}
-        isActive={showMarkerSelector}
-        onClose={handleCloseMarkerSelector}
-      />
-    </div>
-  );
+    );
 }
 
 export default App;
