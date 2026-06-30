@@ -1,10 +1,9 @@
 import axios from 'axios';
 
-// API Nantes Métropole pour les places PMR
-const NANTES_METROPOLE_API = 'https://data.nantesmetropole.fr/api/explore/v2.1/catalog/datasets/244400404_emplacements-pmr-nantes-metropole/records';
+const API_BASE_URL = 'http://localhost:3001/api';
 
 /**
- * Récupère les places PMR à proximité d'une localité
+ * Récupère les places PMR à partir du backend
  * @param {Object} options - Options de recherche
  * @param {number} options.limit - Nombre de résultats à retourner
  * @param {number} options.offset - Décalage pour la pagination
@@ -13,14 +12,10 @@ const NANTES_METROPOLE_API = 'https://data.nantesmetropole.fr/api/explore/v2.1/c
 export const getPMRLocations = async (options = {}) => {
   try {
     const { limit = 100, offset = 0 } = options;
-    const response = await axios.get(NANTES_METROPOLE_API, {
-      params: {
-        limit,
-        offset,
-        order_by: 'commune',
-      },
+    const response = await axios.get(`${API_BASE_URL}/emplacements`, {
+      params: { limit, offset },
     });
-    return response.data.results || [];
+    return response.data || [];
   } catch (error) {
     console.error('Erreur lors de la récupération des places PMR:', error);
     throw error;
@@ -34,13 +29,10 @@ export const getPMRLocations = async (options = {}) => {
  */
 export const getPMRByCommune = async (commune) => {
   try {
-    const response = await axios.get(NANTES_METROPOLE_API, {
-      params: {
-        where: `commune like "${commune}"`,
-        limit: 100,
-      },
-    });
-    return response.data.results || [];
+    const allLocations = await getAllPMRLocations();
+    return allLocations.filter(loc => 
+      loc.commune_nom?.toLowerCase().includes(commune.toLowerCase())
+    );
   } catch (error) {
     console.error(`Erreur lors de la récupération des places PMR pour ${commune}:`, error);
     throw error;
@@ -48,17 +40,15 @@ export const getPMRByCommune = async (commune) => {
 };
 
 /**
- * Récupère toutes les places PMR de Nantes Métropole
+ * Récupère toutes les places PMR depuis le backend
  * @returns {Promise<Array>} - Tableau de toutes les places PMR
  */
 export const getAllPMRLocations = async () => {
   try {
-    const response = await axios.get(NANTES_METROPOLE_API, {
-      params: {
-        limit: 1000,
-      },
+    const response = await axios.get(`${API_BASE_URL}/emplacements`, {
+      params: { limit: 1000 },
     });
-    return response.data.results || [];
+    return response.data || [];
   } catch (error) {
     console.error('Erreur lors de la récupération de toutes les places PMR:', error);
     throw error;
@@ -66,20 +56,34 @@ export const getAllPMRLocations = async () => {
 };
 
 /**
- * Formatte les données de l'API pour la carte
- * @param {Array} pmrData - Données brutes de l'API
+ * Formatte les données du backend pour la carte
+ * @param {Array} pmrData - Données brutes du backend
  * @returns {Array} - Données formatées
  */
 export const formatPMRData = (pmrData) => {
   return pmrData.map((location) => ({
-    id: location.record_id,
-    latitude: location.geo_point_2d?.lat || 0,
-    longitude: location.geo_point_2d?.lon || 0,
-    commune: location.commune || 'Commune inconnue',
+    id: location.id,
+    latitude: location.latitude || 0,
+    longitude: location.longitude || 0,
+    commune: location.commune_nom || 'Commune inconnue',
     adresse: location.adresse || 'Adresse inconnue',
     nombrePlaces: location.nombre_places || 0,
     duree: location.duree_stationnement || 'Non spécifiée',
     type: location.type_de_stationnement || 'Non spécifié',
   }));
+};
+
+/**
+ * Synchronise les données depuis l'API Nantes Métropole vers la base de données
+ * @returns {Promise<Object>} - Résultat de la synchronisation
+ */
+export const syncPMRData = async () => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/sync`);
+    return response.data;
+  } catch (error) {
+    console.error('Erreur lors de la synchronisation des données:', error);
+    throw error;
+  }
 };
 

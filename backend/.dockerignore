@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+.env
+.git
+.gitignore
+README.md
+DEPANNAGE.md
+scripts
+test-connection.js
+sync-data.js

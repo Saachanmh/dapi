@@ -1,0 +1,28 @@
+# Dossiers de dépendances et builds
+node_modules
+dist
+.git
+.github
+.vscode
+
+# Fichiers de configuration locale
+.env
+.env.local
+.env.*.local
+
+# Fichiers de log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Documentation et fichiers projet
+*.md
+!README.md
+
+# Dossiers backend
+backend
+
+# Autres
+.eslintrc.cjs
+.gitignore
+vite.config.js
