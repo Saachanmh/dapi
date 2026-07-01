@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Map from './components/Map';
 import SearchBar from './components/SearchBar';
 import RoutingPanel from './components/RoutingPanel';
@@ -81,8 +81,7 @@ function App() {
     const [error, setError] = useState(null);
     const [showPMR, setShowPMR] = useState(false);
     const [showRoutingPanel, setShowRoutingPanel] = useState(false);
-    const [pmrNearbyRoute, setPMRNearbyRoute] = useState([]);
-    const [customMarkers, setCustomMarkers] = useState([]);
+    const [customMarkers, setCustomMarkers] = useState(() => getMarkersFromLocalStorage());
     const [showElementTypePanel, setShowElementTypePanel] = useState(false);
     const [pendingMarkerType, setPendingMarkerType] = useState(null);
     const [showPlacementHint, setShowPlacementHint] = useState(false);
@@ -115,26 +114,21 @@ function App() {
         }
     }, [loadPMRByNantes]);
 
-    useEffect(() => {
-        loadPMRLocations();
-        const savedMarkers = getMarkersFromLocalStorage();
-        setCustomMarkers(savedMarkers);
-    }, [loadPMRLocations]);
-
-    useEffect(() => {
-        if (route && routePath) {
-            setShowRoutingPanel(true);
-        }
-    }, [route, routePath]);
-
-    useEffect(() => {
+    const pmrNearbyRoute = useMemo(() => {
         if (routePath && pmrLocations.length > 0) {
-            const nearby = findPMRAlongRoute(pmrLocations, routePath, 0.5);
-            setPMRNearbyRoute(nearby);
-        } else {
-            setPMRNearbyRoute([]);
+            return findPMRAlongRoute(pmrLocations, routePath, 0.5);
         }
-    }, [routePath, pmrLocations]);
+
+        return [];
+    }, [pmrLocations, routePath]);
+
+    useEffect(() => {
+        const initialize = async () => {
+            await loadPMRLocations();
+        };
+
+        void initialize();
+    }, [loadPMRLocations]);
 
     const handleSearch = async (addresses) => {
         try {
@@ -157,6 +151,7 @@ function App() {
 
             setRoute(routeData);
             setRoutePath(routeData.geometry);
+            setShowRoutingPanel(true);
 
             console.log('✅ Trajet calculé rue par rue:', {
                 distance: `${routeData.distance.toFixed(2)} m`,
@@ -228,7 +223,6 @@ function App() {
         setRoute(null);
         setRoutePath(null);
         setShowRoutingPanel(false);
-        setPMRNearbyRoute([]);
         setError(null);
     };
 
