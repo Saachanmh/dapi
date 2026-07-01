@@ -49,7 +49,4 @@ dist/
 .turbo/
 .vercel/
 .netlify/
-Dockerfile.frontend
-../backend/Dockerfile
-compose.yml
 

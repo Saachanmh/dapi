@@ -1,9 +1,12 @@
-FROM node:26-alpine3.23
-LABEL authors="dapi"
-COPY . /app
+FROM node:22-alpine AS base
+
 WORKDIR /app
-RUN npm install
 
-CMD ["node", "server.js"]
+COPY package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
 
+COPY . .
 
+EXPOSE 3001
+
+CMD ["npm", "start"]

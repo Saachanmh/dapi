@@ -14,6 +14,7 @@ services:
 
   back:
     build: backend
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-saachanmh}/dapi-backend:latest
     ports:
       - "3001:3001"
     environment:
@@ -28,6 +29,7 @@ services:
     build:
       context: .
       dockerfile:  Dockerfile.frontend
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-saachanmh}/dapi-frontend:latest
     ports:
       - "8080:80"
     networks:
