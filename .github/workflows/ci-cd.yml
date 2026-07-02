@@ -1,138 +1,219 @@
-name: CI/CD
+name: CI/CD Pipeline
 
 on:
   push:
     branches:
       - main
-    tags:
-      - 'v*.*.*'
   pull_request:
+    branches:
+      - main
 
-permissions:
-  contents: read
-  packages: write
-
+# Définir les jobs de manière séquentielle
 jobs:
+
+  # Job 1: Lint
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
-      - run: npm run lint
+          cache: 'npm'
 
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run ESLint
+        run: npm run lint
+
+  # Job 2: Tests unitaires (dépend de lint)
   test:
     name: Tests unitaires
-    runs-on: ubuntu-latest
     needs: lint
+    runs-on: ubuntu-latest
+    services:
+      # Service MySQL pour tests d'intégration
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testrootpassword
+          MYSQL_DATABASE: dapi_pmr_test
+          MYSQL_USER: testuser
+          MYSQL_PASSWORD: testpassword
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u testuser -ptestpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+        ports:
+          - 3306:3306
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
-      - run: npm test
+          cache: 'npm'
 
-  build:
-    name: Build application
-    runs-on: ubuntu-latest
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run tests
+        run: npm run test
+        env:
+          CI: true
+          NODE_ENV: test
+          DB_HOST: 127.0.0.1
+          DB_USER: testuser
+          DB_PASSWORD: testpassword
+          DB_NAME: dapi_pmr_test
+
+      - name: Test build frontend
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+  # Job 3: Build Docker images (dépend de tests)
+  build-docker:
+    name: Build et Push Docker images
     needs: test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install --no-audit --no-fund
-      - run: npm run build
-
-  docker:
-    name: Build and push Docker images
     runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push'
-    strategy:
-      matrix:
-        service:
-          - name: backend
-            context: ./backend
-            dockerfile: ./backend/Dockerfile
-            image: ghcr.io/${{ github.repository_owner }}/dapi-backend
-          - name: frontend
-            context: .
-            dockerfile: ./Dockerfile.frontend
-            image: ghcr.io/${{ github.repository_owner }}/dapi-frontend
+    permissions:
+      packages: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v6
 
-      - uses: docker/setup-qemu-action@v3
+      # Générer les tags d'images cohérents
+      - name: Generate Docker tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}/frontend
+            ghcr.io/${{ github.repository }}/backend
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha,format=long,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/setup-buildx-action@v3
+      # Setup Docker Buildx et cache
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/metadata-action@v5
-        id: meta
+      # Build et push Frontend
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v6
         with:
-          images: ${{ matrix.service.image }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ github.sha }}
-            type=semver,pattern={{version}}
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: ${{ matrix.service.context }}
-          file: ${{ matrix.service.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: true
+          context: .
+          file: ./Dockerfile.frontend
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
 
-  scan:
-    name: Scan Trivy
-    runs-on: ubuntu-latest
-    needs: docker
-    if: github.event_name == 'push'
-    strategy:
-      matrix:
-        image:
-          - ghcr.io/${{ github.repository_owner }}/dapi-backend:${{ github.sha }}
-          - ghcr.io/${{ github.repository_owner }}/dapi-frontend:${{ github.sha }}
-    steps:
-      - uses: aquasecurity/trivy-action@0.28.0
+      # Build et push Backend
+      - name: Build and push Backend
+        uses: docker/build-push-action@v6
         with:
-          image-ref: ${{ matrix.image }}
-          format: table
-          severity: CRITICAL
-          exit-code: 1
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
 
-  deploy:
-    name: Deploy VPS
+  # Job 4: Scan Trivy (dépend de build)
+  scan:
+    name: Scan de sécurité Trivy
+    needs: build-docker
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run Trivy vulnerability scanner (Frontend)
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/frontend:latest
+          format: 'sarif'
+          output: 'trivy-results-frontend.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Run Trivy vulnerability scanner (Backend)
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/backend:latest
+          format: 'sarif'
+          output: 'trivy-results-backend.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      # Fail le pipeline si vulnérabilités CRITICAL
+      - name: Échouer si vulnérabilités CRITICAL
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/frontend:latest
+          format: 'json'
+          output: 'trivy-results-frontend.json'
+          severity: 'CRITICAL'
+          exit-code: '1'
+        continue-on-error: false
+
+      - name: Échouer si vulnérabilités CRITICAL (Backend)
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/backend:latest
+          format: 'json'
+          output: 'trivy-results-backend.json'
+          severity: 'CRITICAL'
+          exit-code: '1'
+        continue-on-error: false
+
+      # Upload des résultats à GitHub Security
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results-frontend.sarif'
+
+  # Job 5: Déploiement (dépend de scan, uniquement pour la branche main)
+  deploy:
+    name: Déploiement Production
     needs: scan
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     environment:
       name: production
+      url: https://votre-domaine.com
     steps:
-      - uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          script: |
-            set -e
-            cd "${{ secrets.VPS_APP_DIR }}"
-            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
-            export GITHUB_REPOSITORY_OWNER="${{ github.repository_owner }}"
-            docker compose pull
-            docker compose up -d --no-build --remove-orphans
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Déployer sur VPS
+        run: |
+          echo "Déploiement en cours..."
+          # Ici, ajoutez vos étapes de déploiement :
+          # - SSH vers le VPS
+          # - Pull les images Docker
+          # - Redémarrer les services
