@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://api.dapi.chloe.hervouet.mds-nantes.fr/api';
+const API_BASE_URL = 'https://api.dapi.chloe.hervouet.mds-nantes.fr/api';
 
 /**
  * Récupère les places PMR à partir du backend
