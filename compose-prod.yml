@@ -1,0 +1,67 @@
+services:
+  db:
+    image: mysql:8.4.10
+    container_name: dapi-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      - dapi_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  back:
+    image: ghcr.io/saachanmh/dapi-backend:latest
+    container_name: dapi-back
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - public_network
+
+  front:
+    image: ghcr.io/saachanmh/dapi-frontend:latest
+    container_name: dapi-front
+    restart: unless-stopped
+    networks:
+      - public_network
+
+  adminer:
+    image: adminer:4.8.1
+    container_name: dapi-adminer
+    restart: unless-stopped
+    profiles: ["dev"]
+    ports:
+      - "8081:8080"
+    networks:
+      - default
+
+networks:
+  default:
+    name: dapi-network
+    driver: bridge
+  public_network:
+    name: public_network
+    external: true
+
+volumes:
+  dapi_db_data:

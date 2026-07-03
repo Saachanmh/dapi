@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = 'http://api.dapi.chloe.hervouet.mds-nantes.fr/api';
 
 /**
  * Récupère les places PMR à partir du backend
@@ -30,7 +30,7 @@ export const getPMRLocations = async (options = {}) => {
 export const getPMRByCommune = async (commune) => {
   try {
     const allLocations = await getAllPMRLocations();
-    return allLocations.filter(loc => 
+    return allLocations.filter(loc =>
       loc.commune_nom?.toLowerCase().includes(commune.toLowerCase())
     );
   } catch (error) {
