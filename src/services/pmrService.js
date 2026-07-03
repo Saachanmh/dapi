@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'https://api.dapi.chloe.hervouet.mds-nantes.fr/api';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://api.dapi.chloe.hervouet.mds-nantes.fr/api').replace(/\/$/, '');
 
 /**
  * Récupère les places PMR à partir du backend
@@ -86,4 +86,3 @@ export const syncPMRData = async () => {
     throw error;
   }
 };
-

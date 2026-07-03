@@ -1,150 +1,240 @@
-# 🚗 PMR Nantes - Application de Cartographie pour Personnes à Mobilité Réduite
+# Dapi
 
-Une application web moderne pour localiser les places de stationnement PMR (Personnes à Mobilité Réduite) à Nantes et sa métropole. Construite avec React et Vite, elle fournit un accès facile aux données d'accessibilité grâce aux APIs d'IGN et de Nantes Métropole.
+Dapi est une application web de cartographie PMR pour Nantes et sa metropole. Elle affiche les emplacements accessibles, propose une recherche d'adresses, calcule des itineraires et met en avant les points PMR proches du trajet.
 
-## 🎯 Fonctionnalités
+## Architecture
 
-- **🗺️ Carte Interactive** : Visualisation en temps réel des places PMR sur une carte Leaflet
-- **🔍 Recherche d'Adresses** : Trouvez facilement votre destination
-- **📍 Calcul d'Itinéraires** : Obtenez la distance et la durée estimée
-- **♿ Localisation PMR** : Identifiez toutes les places accessibles à proximité
-- **📊 Informations Détaillées** : Nombre de places, durée de stationnement, type de place
-- **📱 Responsive Design** : Fonctionne sur tous les appareils (desktop, tablette, mobile)
+L'application est decoupee en 4 blocs :
 
-## 🏗️ Architecture
+- **Frontend** : React + Vite + Leaflet, avec carte, recherche, filtres et outils d'accessibilite.
+- **Backend** : Node.js / Express, expose l'API `/api/*`, synchronise les donnees et alimente MySQL.
+- **Base de donnees** : MySQL, avec `communes`, `emplacements_pmr`, `utilisateurs`, `favoris`, `avis`.
+- **Services externes** : Nantes Metropole, IGN, Nominatim, OSRM, OpenStreetMap, GHCR, Adminer, Uptime Kuma, Grafana.
 
-```
-src/
-├── components/          # Composants React
-│   ├── Map.jsx         # Composant principal de la carte
-│   ├── SearchBar.jsx   # Barre de recherche
-│   ├── RoutingPanel.jsx # Panneau de routage
-│   └── PMRMarkerPopup.jsx # Popup pour les marqueurs PMR
-├── services/           # Services API
-│   ├── pmrService.js   # Service pour les places PMR
-│   └── routingService.js # Service de routage et géocodage
-├── hooks/              # Custom React hooks
-│   └── usePMRLocations.js # Hook pour gérer les localisations
-├── constants/          # Constantes de l'application
-│   └── labels.js       # Labels et textes
-├── config/             # Configuration
-│   └── appConfig.js    # Configuration globale
-├── styles/             # Fichiers CSS
-│   ├── map.css
-│   ├── searchBar.css
-│   ├── routingPanel.css
-│   └── pmrMarker.css
-├── App.jsx            # Composant principal
-├── main.jsx           # Point d'entrée
-└── index.css          # Styles globaux
+```mermaid
+flowchart LR
+  U[Utilisateur] --> F[Frontend React/Vite]
+  F --> B[Backend Express]
+  B --> DB[(MySQL)]
+  B --> NM[Nantes Metropole Open Data]
+  F --> N[Nominatim / OpenStreetMap]
+  F --> O[OSRM]
+  F --> I[IGN API]
+  Ops[Exploitation] --> A[Adminer]
+  Ops --> K[Uptime Kuma]
+  Ops --> G[Grafana]
+  A --> DB
+  K --> B
+  G --> B
 ```
 
-## 🚀 Installation et Démarrage
+### Flux
 
-### Prérequis
-- Node.js (v16+)
-- npm ou yarn
+1. Le frontend charge les emplacements PMR via le backend.
+2. Le backend lit MySQL et peut synchroniser les donnees depuis l'open data Nantes Metropole.
+3. Le frontend geocode les adresses et calcule les itineraires via les services publics.
+4. Les marqueurs personnalises sont stockes cote navigateur via `localStorage`.
 
-### Installation
+## Structure du depot
+
+| Chemin | Role |
+|---|---|
+| `src/` | Application frontend React |
+| `backend/` | API, modele MySQL, scripts d'initialisation et de synchronisation |
+| `tests/` | Tests Node.js |
+| `compose.yml` | Stack de developpement / debug |
+| `compose-prod.yml` | Stack de production a base d'images GHCR |
+| `docs/` | ADR et runbooks |
+
+## Lancer en local
+
+### Prerequis
+
+- Node.js 22+
+- npm
+- MySQL 8+
+
+### 1. Recuperer le projet
+
+```bash
+git clone <url-du-repo>
+cd Dapi
+```
+
+### 2. Installer les dependances frontend
+
 ```bash
 npm install
 ```
 
-### Développement
+### 3. Installer les dependances backend
+
+```bash
+cd backend
+npm install
+cd ..
+```
+
+### 4. Preparer les variables d'environnement
+
+Copie `/.env.example` vers `/.env`, puis cree aussi `backend/.env` avec les memes valeurs cote backend.
+
+Variables minimales :
+
+```env
+DB_HOST=localhost
+DB_USER=dapi_user
+DB_PASSWORD=mot_de_passe_fort
+DB_NAME=dapi_pmr
+DB_ROOT_PASSWORD=mot_de_passe_root
+PORT=3001
+FRONTEND_PORT=5173
+VITE_API_BASE_URL=http://localhost:3001/api
+API_BASE_URL=http://localhost:3001
+```
+
+### 5. Creer la base MySQL
+
+Lancer MySQL localement, puis initialiser le schema :
+
+```bash
+cd backend
+node scripts/initDB.js
+cd ..
+```
+
+Le schema est defini dans `backend/database/schema.sql`.
+
+### 6. Demarrer le backend
+
+```bash
+cd backend
+npm run dev
+```
+
+Le backend ecoute par defaut sur `http://localhost:3001`.
+
+### 7. Demarrer le frontend
+
+Dans un autre terminal :
+
 ```bash
 npm run dev
 ```
-L'application sera disponible à `http://localhost:5173`
 
-### Build Production
+Le frontend Vite demarre par defaut sur `http://localhost:5173`.
+
+### 8. Synchroniser les donnees PMR
+
+Quand le backend est operationnel :
+
 ```bash
+cd backend
+node scripts/sync-once.js
+```
+
+## Procedure complete de lancement local
+
+1. Installer Node.js 22+ et MySQL 8+.
+2. Cloner le depot.
+3. Installer les dependances du frontend a la racine.
+4. Installer les dependances du backend dans `backend/`.
+5. Creer `/.env` et `backend/.env`.
+6. Initialiser le schema MySQL avec `node scripts/initDB.js`.
+7. Demarrer le backend avec `npm run dev` depuis `backend/`.
+8. Demarrer le frontend avec `npm run dev` depuis la racine.
+9. Ouvrir l'application sur `http://localhost:5173`.
+10. Lancer la synchronisation des donnees avec `node scripts/sync-once.js` si necessaire.
+
+### Docker
+
+- `compose.yml` est oriente developpement/debug.
+- `compose-prod.yml` utilise les images publiees sur GHCR.
+- Les reseaux `proxy-net` et `public_network` sont externes et doivent exister dans l'infra cible.
+
+## API
+
+| Methode | Route | Description |
+|---|---|---|
+| `GET` | `/api/emplacements` | Liste paginee des emplacements PMR |
+| `GET` | `/api/emplacements/:id` | Detail d'un emplacement |
+| `GET` | `/api/communes` | Liste des communes |
+| `POST` | `/api/sync` | Synchronise les donnees Nantes Metropole vers MySQL |
+| `GET` | `/` | Verification rapide du backend |
+
+## Variables d'environnement
+
+### Racine
+
+| Variable | Role | Exemple |
+|---|---|---|
+| `FRONTEND_PORT` | Port Vite en local | `5173` |
+| `VITE_API_BASE_URL` | URL du backend utilisee par le frontend | `http://localhost:3001/api` |
+| `GITHUB_REPOSITORY_OWNER` | Prefixe des images Docker GHCR | `saachanmh` |
+
+### Backend / MySQL
+
+| Variable | Role | Exemple |
+|---|---|---|
+| `DB_HOST` | Hote MySQL | `localhost` ou `db` |
+| `DB_USER` | Utilisateur MySQL | `dapi_user` |
+| `DB_PASSWORD` | Mot de passe MySQL | `***` |
+| `DB_NAME` | Base MySQL | `dapi_pmr` |
+| `DB_ROOT_PASSWORD` | Mot de passe root MySQL | `***` |
+| `PORT` | Port backend | `3001` |
+| `API_BASE_URL` | URL utilisee par `backend/scripts/sync-once.js` | `http://localhost:3001` |
+
+## Contribuer
+
+### Conventions
+
+- JavaScript ESM partout.
+- ESLint comme reference de style.
+- Variables inutilisees interdites.
+- Fonctions courtes et nommage explicite.
+- Commentaires seulement quand la logique n'est pas evidente.
+
+### Verifications
+
+```bash
+npm run lint
+npm test
 npm run build
 ```
 
-### Preview
+### Cote backend
+
 ```bash
-npm run preview
+cd backend
+npm run dev
+node scripts/initDB.js
+node test-connection.js
 ```
 
-## 📚 Technologies Utilisées
+### Messages de commit
 
-- **React 19** : Framework UI moderne
-- **Vite** : Bundler ultra-rapide
-- **Leaflet** : Bibliothèque de cartographie
-- **React-Leaflet** : Intégration React/Leaflet
-- **Axios** : Client HTTP pour les requêtes API
-- **CSS3** : Styles modernes et animations
+Utiliser des commits courts et explicites :
 
-## 🔌 APIs Intégrées
+- `feat: ...`
+- `fix: ...`
+- `docs: ...`
+- `refactor: ...`
+- `chore: ...`
 
-### Nantes Métropole
-- **Dataset PMR** : https://data.nantesmetropole.fr/explore/dataset/244400404_emplacements-pmr-nantes-metropole/
+## Ressources externes
 
-### IGN (Institut Géographique National)
-- **Géocodage** : Conversion adresses ↔ coordonnées
-- **Routage** : Calcul d'itinéraires optimisés
+- Nantes Metropole open data : https://data.nantesmetropole.fr/
+- IGN geocodage : https://geoservices.ign.fr/documentation-services
+- Nominatim : https://nominatim.org/
+- OSRM : https://project-osrm.org/
+- OpenStreetMap : https://www.openstreetmap.org/
+- GHCR : https://ghcr.io/
+- GitHub Packages containers : https://github.com/users/saachanmh/packages/container/package/dapi-frontend
+- Adminer : https://www.adminer.org/
+- Uptime Kuma : https://github.com/louislam/uptime-kuma
+- Grafana : https://grafana.com/
 
-## 📋 Structuration et Bonnes Pratiques React/JavaScript
+## Documentation d'architecture
 
-### Structure des Composants
-- **Composants fonctionnels** : Utilisation exclusive de fonctions avec hooks
-- **Séparation des responsabilités** : Un composant = une responsabilité
-- **Props destructurées** : Meilleure lisibilité
-- **JSDoc** : Documentation des fonctions
-
-### Gestion d'État
-- **useState** : État local des composants
-- **useEffect** : Effets secondaires et chargement de données
-- **Custom Hooks** : Logique réutilisable
-
-### Services
-- **Séparation API** : Services dédiés pour chaque source de données
-- **Gestion d'erreurs** : Try/catch et retours d'erreur clairs
-- **Formatage des données** : Normalisation des réponses API
-
-### Styles
-- **CSS Modules** : Importation CSS avec scope
-- **Variables CSS** : Thème cohérent
-- **Animations** : Transitions fluides
-- **Responsive** : Breakpoints pour mobiles
-
-## 🎨 Schéma de Couleurs
-
-- **Bleu** (#4a90e2) : Couleur principale
-- **Rouge** (#ff6b6b) : Places PMR
-- **Turquoise** (#4ecdc4) : Point de départ
-- **Vert clair** (#95e1d3) : Point d'arrivée
-
-## 🔄 Flux de l'Application
-
-1. L'utilisateur ouvre l'application
-2. Les places PMR se chargent depuis l'API Nantes Métropole
-3. L'utilisateur recherche une adresse (départ)
-4. L'utilisateur recherche une destination
-5. Un itinéraire est calculé
-6. Les places PMR à proximité sont affichées
-7. L'utilisateur peut sélectionner une place PMR ou ajuster l'itinéraire
-
-## 📱 Points de Rupture Responsive
-
-- **Desktop** : Full layout avec panneau latéral
-- **Tablette** (< 768px) : Layout adapté
-- **Mobile** (< 480px) : Layout empilé
-
-## 🐛 Dépannage
-
-### La carte n'apparaît pas
-- Vérifier que Leaflet est correctement importé
-- Vérifier la hauteur du conteneur
-
-### Les places PMR ne s'affichent pas
-- Vérifier la connexion à l'API Nantes Métropole
-- Vérifier la console pour les erreurs réseau
-
-### Erreurs CORS
-- Les APIs utilisées autorisent les requêtes cross-origin
-- Sinon, utiliser un proxy CORS
-
-## 📝 Licence
-
-MIT
+- ADR 0001 : `docs/adr/0001-configurable-api-base-url.md`
+- Runbook : `docs/runbooks/sync-pmr-data.md`
